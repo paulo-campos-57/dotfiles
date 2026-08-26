@@ -6,6 +6,10 @@ mcd() {
     mkdir -p "$1" && cd "$1"
 }
 
+gohome() {
+    cd "$HOME" && echo "You are here: $(pwd)"
+}
+
 # navigation aliases
 alias ..='cd ..'
 alias ...='cd ../..'
