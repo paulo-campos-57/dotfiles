@@ -1,16 +1,32 @@
+# utils
 alias cls='clear'
-alias gsts='git status'
-alias gbranch='git branch --show-current'
-alias gph='git push origin HEAD'
-alias glog='git shortlog -s -n --all'
 
+mcd() {
+    [[ -z "$1" ]] && { echo "Usage: mcd <dir-name>"; return 1; }
+    mkdir -p "$1" && cd "$1"
+}
+
+# navigation aliases
 alias ..='cd ..'
 alias ...='cd ../..'
 alias ....='cd ../../..'
 
+# file and net operation
+alias myip='curl iconfig.me; echo'
+alias ports='netstat -tulanp'
+alias diskh='df -h'
+alias fmem='free -m -h'
+
+
+
 # ========================
-# GIT SHORTCUTS
+# GIT SHORTCUTS AND ALIASES
 # =======================
+
+alias gsts='git status'
+alias gbranch='git branch --show-current'
+alias gph='git push origin HEAD'
+alias glog='git shortlog -s -n --all'
 
 # create new branch
 gnb() {
