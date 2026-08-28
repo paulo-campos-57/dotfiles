@@ -43,6 +43,12 @@ extract() {
         fi
 }
 
+# creates a backup file of any file
+bak() {
+        [[ -z "$1" ]] && { echo "Usage: bak <file>"; return 1; }
+        cp -r "$1" "${1}.bak" && echo "Backup created: ${1}.bak"
+}
+
 # ========================
 # GIT SHORTCUTS AND ALIASES
 # =======================
@@ -134,4 +140,24 @@ ghelp() {
         printf " %-8s %s\n" "gdb" "Deletes specific branch"
         printf " %-8s %s\n" "gprune" "Clears local refs of deleted branches"
         echo
+}
+
+# ========================
+# DOCKER SHORTCUTS AND ALIASES
+# =======================
+
+alias dps='docker ps --format "table {{.ID}}\t{{.Names}}\t{{.Status}}\t{{.Ports}}"'
+alias dstopall='docker stop $(docker ps -a -q)'
+
+# enters the bash/sh of an executing container
+dexec() {
+        [[ -z "$1" ]] && { echo "Usage: dexec <container-name|id>"; return 1; }
+        local shell="${2:-bash}"
+        docker exec -it "$1" "$shell"
+}
+
+# clears unused containers images and volumes
+dclean() {
+        echo "Cleaning unused docker resources..."
+        docker system prune -a --volumes -f
 }
