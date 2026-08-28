@@ -16,7 +16,7 @@ alias ...='cd ../..'
 alias ....='cd ../../..'
 
 # file and net operation
-alias myip='curl iconfig.me; echo'
+alias myip='curl ifconfig.me; echo'
 alias ports='netstat -tulanp'
 alias diskh='df -h'
 alias fmem='free -m -h'
@@ -82,7 +82,7 @@ grs() {
         local file="$1"
 
         [[ -z "$file" ]] && {
-                echo: "Usage: grs <file>"
+                echo "Usage: grs <file>"
                 return 1
         }
 
