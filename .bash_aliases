@@ -21,7 +21,27 @@ alias ports='netstat -tulanp'
 alias diskh='df -h'
 alias fmem='free -m -h'
 
-
+# extract from any extension
+extract() {
+        if [ -f "$1" ]; then
+                case "$1" in
+                        *.tar.bz2)   tar xjf "$1"     ;;
+                        *.tar.gz)    tar xzf "$1"     ;;
+                        *.bz2)       bunzip2 "$1"     ;;
+                        *.rar)       unrar x "$1"     ;;
+                        *.gz)        gunzip "$1"      ;;
+                        *.tar)       tar xvf "$1"     ;;
+                        *.tbz2)      tar xjf "$1"     ;;
+                        *.tgz)       tar xzf "$1"     ;;
+                        *.zip)       unzip "$1"       ;;
+                        *.Z)         uncompress "$1"  ;;
+                        *.7z)        7z x "$1"        ;;
+                        *)           echo "'$1' cannot be extracted via extract()" ;;
+                esac
+        else
+                echo "'$1' is not a valid file"
+        fi
+}
 
 # ========================
 # GIT SHORTCUTS AND ALIASES
@@ -31,6 +51,8 @@ alias gsts='git status'
 alias gbranch='git branch --show-current'
 alias gph='git push origin HEAD'
 alias glog='git shortlog -s -n --all'
+alias glogg='git log --graph --oneline --decorate --all'
+alias gprune='git fetch --prune'
 
 # create new branch
 gnb() {
@@ -96,13 +118,20 @@ gdb(){
 ghelp() {
         echo "GIT SHORTCUTS:"
         echo
+        # Info and status
         printf " %-8s %s\n" "gsts" "Shows repo status"
         printf " %-8s %s\n" "gbranch" "Shows current branch"
-        printf " %-8s %s\n" "gph" "Pushes to HEAD branch"
-        printf " %-8s %s\n" "gnb" "Creates a new branch from the current one"
-        printf " %-8s %s\n" "gco" "Switches to existing branch"
-        printf " %-8s %s\n" "grs" "Retores file to git state"
         printf " %-8s %s\n" "glog" "Shows commit count per author"
+        printf " %-8s %s\n" "glogg" "Shows visual commit tree"
+        echo
+        # Branches flow
+        printf " %-8s %s\n" "gco" "Switches to existing branch"
+        printf " %-8s %s\n" "gnb" "Creates a new branch from current"
+        printf " %-8s %s\n" "gph" "Pushes to HEAD branch"
+        echo
+        # Changes and maintenance
+        printf " %-8s %s\n" "grs" "Restores file to git state"
         printf " %-8s %s\n" "gdb" "Deletes specific branch"
+        printf " %-8s %s\n" "gprune" "Clears local refs of deleted branches"
         echo
 }
