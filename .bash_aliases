@@ -1,6 +1,9 @@
 # utils
 alias cls='clear'
 
+alias path='echo -e ${PATH//:/\\n}'
+alias ff='find . -type f -name'
+
 mcd() {
     [[ -z "$1" ]] && { echo "Usage: mcd <dir-name>"; return 1; }
     mkdir -p "$1" && cd "$1"
