@@ -49,6 +49,12 @@ bak() {
         cp -r "$1" "${1}.bak" && echo "Backup created: ${1}.bak"
 }
 
+# searches a process by name
+psg() {
+        [[ -z "$1"]] && { echo "Usage: psg <process-name>"; return 1; }
+        ps aux | grep -v grep | grep -i --color=auto "$1"
+}
+
 # ========================
 # GIT SHORTCUTS AND ALIASES
 # =======================
