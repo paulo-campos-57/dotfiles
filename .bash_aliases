@@ -68,6 +68,7 @@ alias gph='git push origin HEAD'
 alias glog='git shortlog -s -n --all'
 alias glogg='git log --graph --oneline --decorate --all'
 alias gprune='git fetch --prune'
+alias gfo='git fetch origin'
 
 # create new branch
 gnb() {
@@ -143,6 +144,7 @@ ghelp() {
         printf " %-8s %s\n" "gco" "Switches to existing branch"
         printf " %-8s %s\n" "gnb" "Creates a new branch from current"
         printf " %-8s %s\n" "gph" "Pushes to HEAD branch"
+        printf " %-8s %s\n" "gfo" "Fetches remote updates safely without merging"
         echo
         # Changes and maintenance
         printf " %-8s %s\n" "grs" "Restores file to git state"
