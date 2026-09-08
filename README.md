@@ -15,7 +15,7 @@
 Install all aliases and utility functions directly with a single command:
 
 ```bash
-curl -sSL [https://raw.githubusercontent.com/paulo-campos-57/dotfiles/main/install.sh](https://raw.githubusercontent.com/paulo-campos-57/dotfiles/main/install.sh) | bash
+curl -sSL https://raw.githubusercontent.com/paulo-campos-57/dotfiles/main/install.sh | bash
 ```
 
 ### Manual instalation
@@ -112,7 +112,7 @@ The `install.sh` script automatically inspects your enviroment before making cha
 Instale todos os aliases e funções utilitárias diretamente com um único comando no terminal:
 
 ```bash
-curl -sSL [https://raw.githubusercontent.com/paulo-campos-57/dotfiles/main/install.sh](https://raw.githubusercontent.com/paulo-campos-57/dotfiles/main/install.sh) | bash
+curl -sSL https://raw.githubusercontent.com/paulo-campos-57/dotfiles/main/install.sh | bash
 ```
 
 ### Instalação Manual
