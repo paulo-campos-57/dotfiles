@@ -172,3 +172,103 @@ dclean() {
         echo "Cleaning unused docker resources..."
         docker system prune -a --volumes -f
 }
+
+# ========================
+# GIT REPORT GENERATORS
+# ========================
+
+#region Report configuration
+_git_reports_dir() {
+    if [[ -z "${DOTFILES_SCRIPTS_DIR:-}" ]]; then
+        echo "[ERROR] DOTFILES_SCRIPTS_DIR is not configured!" >&2
+        return 1
+    fi
+
+    printf '%s\n' "$DOTFILES_SCRIPTS_DIR/git"
+}
+
+_run_git_report() {
+    local script_name="$1"
+    shift
+
+    local scripts_dir
+    local script_path
+    local repo
+    local output
+
+    scripts_dir="$(_git_reports_dir)" || return 1
+    script_path="$scripts_dir/$script_name"
+
+    if [[ ! -f "$script_path" ]]; then
+        echo "[ERROR] Script not found: $script_path" >&2
+        return 1
+    fi
+
+    if ! command -v git &>/dev/null; then
+        echo "[ERROR] Git is not installed!" >&2
+        return 1
+    fi
+
+    repo="${1:-.}"
+
+    if ! git -C "$repo" rev-parse --is-inside-work-tree &>/dev/null; then
+        echo "[ERROR] Directory '$repo' is not a valid Git repository!" >&2
+        return 1
+    fi
+
+    repo="$(git -C "$repo" rev-parse --show-toplevel)" || return 1
+
+    if [[ $# -ge 2 ]]; then
+        output="$2"
+    else
+        output="$repo/git-reports/${script_name%.sh}"
+    fi
+
+    bash "$script_path" "$repo" "$output"
+}
+#endregion
+
+#region Report commands
+gcommits() {
+    _run_git_report "commit-report.sh" "$@"
+}
+
+gbranches() {
+    _run_git_report "branch-report.sh" "$@"
+}
+
+gcontributors() {
+    _run_git_report "contributor-report.sh" "$@"
+}
+
+gchurn() {
+    _run_git_report "code-churn.sh" "$@"
+}
+#endregion
+
+#region Report help
+greports() {
+    echo "=========================================="
+    echo "             Git Report Tools             "
+    echo "=========================================="
+    echo
+
+    printf " %-16s %s\n" "COMMAND" "DESCRIPTION"
+    echo "------------------------------------------------------------"
+
+    printf " %-16s %s\n" "gcommits" "Generates commit statistics"
+    printf " %-16s %s\n" "gbranches" "Analyzes repository branches"
+    printf " %-16s %s\n" "gcontributors" "Analyzes contributor activity"
+    printf " %-16s %s\n" "gchurn" "Analyzes file modification frequency"
+
+    echo
+    echo "Usage:"
+    echo "  <command> [repository] [output-directory]"
+    echo
+    echo "Examples:"
+    echo "  gcommits"
+    echo "  gbranches /path/to/repository"
+    echo "  gcontributors /path/to/repository"
+    echo "  gchurn /path/to/repository /path/to/output"
+}
+#endregion
