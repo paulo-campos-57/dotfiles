@@ -166,7 +166,7 @@ mkdir -p "$OUTPUT"
 OUTPUT="$(cd "$OUTPUT" && pwd)"
 
 RAW="$OUTPUT/commits_raw.tsv"
-SUMMARY="$OUTPUT/resumo.dat"
+SUMMARY="$OUTPUT/resume.dat"
 EVOLUTION="$OUTPUT/evolution.dat"
 
 success "Output directory configured."
@@ -380,7 +380,7 @@ echo
 
 success "distribution.png"
 success "evolution.png"
-success "resumo.dat"
+success "resume.dat"
 success "evolution.dat"
 
 echo
