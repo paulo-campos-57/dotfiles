@@ -40,7 +40,7 @@ echo
 
 echo "--- Checking Requirements ---"
 
-for dependency in git awk gnuplot date sort; do
+for dependency in git awk gnuplot date sort mkdir mktemp; do
     if ! command -v "$dependency" &>/dev/null; then
         error "$dependency is not installed!"
     fi
@@ -51,6 +51,8 @@ done
 if ! git -C "$REPO" rev-parse --is-inside-work-tree &>/dev/null; then
     error "Directory '$REPO' is not a valid Git repository!"
 fi
+
+REPO="$(git -C "$REPO" rev-parse --show-toplevel)"
 
 success "Git repository found."
 #endregion
@@ -128,7 +130,7 @@ case "$PERIOD_OPTION" in
             error "Invalid year! Expected YYYY."
         fi
 
-        NEXT_YEAR=$(printf "%04d" "$((10#$INPUT_YEAR + 1))")
+        NEXT_YEAR="$(printf "%04d" "$((10#$INPUT_YEAR + 1))")"
 
         SINCE="$INPUT_YEAR-01-01 00:00:00"
         UNTIL="$NEXT_YEAR-01-01 00:00:00"
@@ -162,21 +164,38 @@ info "Evolution chart granularity: $GRANULARITY"
 #region Output configuration
 OUTPUT="$OUTPUT/$PERIOD_SLUG"
 
-mkdir -p "$OUTPUT"
+if ! mkdir -p -- "$OUTPUT"; then
+    error "Cannot create output directory: $OUTPUT"
+fi
+
 OUTPUT="$(cd "$OUTPUT" && pwd)"
 
 RAW="$OUTPUT/commits_raw.tsv"
 SUMMARY="$OUTPUT/resumo.dat"
 EVOLUTION="$OUTPUT/evolution.dat"
 
+DISTRIBUTION_CHART="$OUTPUT/distribuicao.png"
+EVOLUTION_CHART="$OUTPUT/evolucao.png"
+
+TOTAL_FILE="$OUTPUT/.total"
+
+# Remove previous generated results.
+rm -f -- \
+    "$RAW" \
+    "$SUMMARY" \
+    "$EVOLUTION" \
+    "$DISTRIBUTION_CHART" \
+    "$EVOLUTION_CHART" \
+    "$TOTAL_FILE"
+
 success "Output directory configured."
 #endregion
 
-#region Commit check
+#region Commit extraction
 echo
 echo "--- Analyzing Commits ---"
 
-info "Repository: $(git -C "$REPO" rev-parse --show-toplevel)"
+info "Repository: $REPO"
 info "Output directory: $OUTPUT"
 info "Reading commits from all branches..."
 
@@ -197,7 +216,9 @@ if [[ -n "$UNTIL" ]]; then
     GIT_ARGS+=("--before=$UNTIL")
 fi
 
-git "${GIT_ARGS[@]}" > "$RAW"
+if ! git "${GIT_ARGS[@]}" > "$RAW"; then
+    error "Failed to extract Git commits!"
+fi
 
 if [[ ! -s "$RAW" ]]; then
     warning "No commits found for the selected period."
@@ -215,112 +236,177 @@ info "Normalizing tags (case-insensitive)..."
 info "Grouping FEAT and ADD into one category..."
 info "Classifying unrecognized commits as OTHER..."
 
-awk -F '\t' \
+# Initialize output files.
+: > "$SUMMARY"
+: > "$EVOLUTION"
+
+if ! awk -F '\t' \
     -v summary="$SUMMARY" \
-    -v evolution="$EVOLUTION" '
+    -v evolution="$EVOLUTION" \
+    -v total_file="$TOTAL_FILE" '
 BEGIN {
-    n = split(
-        "FEAT/ADD FIX TEST REFACTOR DOCS CHORE STYLE OTHER",
-        tags, " "
-    )
+    n = split("FEAT/ADD FIX TEST REFACTOR DOCS CHORE STYLE OTHER", tags, " ")
+    total = 0
 }
+
 {
     period = $1
     subject = toupper($2)
     tag = "OTHER"
 
-    if (subject ~ /\[(FEAT|ADD)\]/)
+    if (subject ~ /\[(FEAT|ADD)\]/) {
         tag = "FEAT/ADD"
-    else if (subject ~ /\[FIX\]/)
+    }
+    else if (subject ~ /\[FIX\]/) {
         tag = "FIX"
-    else if (subject ~ /\[TEST\]/)
+    }
+    else if (subject ~ /\[TEST\]/) {
         tag = "TEST"
-    else if (subject ~ /\[REFACTOR\]/)
+    }
+    else if (subject ~ /\[REFACTOR\]/) {
         tag = "REFACTOR"
-    else if (subject ~ /\[DOCS\]/)
+    }
+    else if (subject ~ /\[DOCS\]/) {
         tag = "DOCS"
-    else if (subject ~ /\[CHORE\]/)
+    }
+    else if (subject ~ /\[CHORE\]/) {
         tag = "CHORE"
-    else if (subject ~ /\[STYLE\]/)
+    }
+    else if (subject ~ /\[STYLE\]/) {
         tag = "STYLE"
+    }
 
     count[tag]++
-    periodCount[period, tag]++
+    period_count[period, tag]++
     periods[period] = 1
     total++
 }
+
 END {
-    if (total == 0) exit
-
-    for (i = 1; i <= n; i++) {
-        tag = tags[i]
-        percentage = count[tag] * 100 / total
-
-        printf "%s %.2f %d\n",
-            tag, percentage, count[tag] > summary
+    if (total == 0) {
+        print 0 > total_file
+        exit
     }
 
+    # Generate tag distribution.
+    for (i = 1; i <= n; i++) {
+        tag = tags[i]
+        tag_count = count[tag] + 0
+        percentage = tag_count * 100 / total
+
+        printf "%s %.2f %d\n", tag, percentage, tag_count >> summary
+    }
+
+    # Generate evolution data.
     for (period in periods) {
         printf "%s", period >> evolution
 
         for (i = 1; i <= n; i++) {
             tag = tags[i]
-            printf " %d", periodCount[period, tag] >> evolution
+            tag_count = period_count[period, tag] + 0
+
+            printf " %d", tag_count >> evolution
         }
 
         printf "\n" >> evolution
     }
 
-    printf "%d\n", total > "/dev/stderr"
+    print total > total_file
+
+    close(summary)
+    close(evolution)
+    close(total_file)
 }
-' "$RAW" 2>"$OUTPUT/.total"
+' "$RAW"; then
+    error "AWK failed while processing commit statistics!"
+fi
 
-TOTAL=$(cat "$OUTPUT/.total")
-rm -f "$OUTPUT/.total"
+if [[ ! -s "$TOTAL_FILE" ]]; then
+    error "Commit analysis did not generate a total count!"
+fi
 
-sort -o "$EVOLUTION" "$EVOLUTION"
+TOTAL="$(cat "$TOTAL_FILE")"
+rm -f -- "$TOTAL_FILE"
+
+if [[ "$TOTAL" -eq 0 ]]; then
+    warning "No valid commits found for analysis."
+    exit 0
+fi
+
+if [[ ! -s "$SUMMARY" || ! -s "$EVOLUTION" ]]; then
+    error "Commit analysis did not generate the expected data files!"
+fi
+
+# Sort periods chronologically.
+LC_ALL=C sort -k1,1 "$EVOLUTION" -o "$EVOLUTION"
 
 success "$TOTAL commits analyzed."
 success "Commit tags normalized successfully."
+success "Summary and evolution data generated."
 
-OTHER_COUNT=$(awk '$1 == "OTHER" {print $3}' "$SUMMARY")
+OTHER_COUNT="$(awk '$1 == "OTHER" {print $3}' "$SUMMARY")"
 
 if [[ "${OTHER_COUNT:-0}" -gt 0 ]]; then
     warning "$OTHER_COUNT commits classified as OTHER."
 fi
 #endregion
 
-#region Charts
+#region Chart validation
+echo
+echo "--- Checking Chart Support ---"
+
+if ! gnuplot -e 'set terminal pngcairo' &>/dev/null; then
+    error "Gnuplot does not support the pngcairo terminal!"
+fi
+
+success "Gnuplot PNG support available."
+#endregion
+
+
+#region Distribution chart
 echo
 echo "--- Generating Charts ---"
 
 info "Generating commit distribution chart..."
 
-gnuplot <<EOF
+if ! gnuplot <<EOF
 set terminal pngcairo size 1300,750 enhanced font "Arial,12"
-set output "$OUTPUT/distribuicao.png"
+set output "$DISTRIBUTION_CHART"
 
 set title "Commit Distribution - $PERIOD_LABEL"
 set xlabel "Percentage (%)"
 set xrange [0:100]
 set yrange [-1:8]
+
 set grid xtics
 set key off
+set border 3
+set tics nomirror
 
-set style fill solid 0.8
-set boxwidth 0.7
+set style fill solid 0.8 border -1
 
-plot "$SUMMARY" using 2:0:ytic(1) \
-    with boxes horizontal lc rgb "#DA291C" notitle
+plot "$SUMMARY" using (\$2/2):0:(\$2/2):(0.35):ytic(1) \
+    with boxxyerror lc rgb "#DA291C" notitle
+
+unset output
 EOF
+then
+    error "Failed to generate commit distribution chart!"
+fi
+
+if [[ ! -s "$DISTRIBUTION_CHART" ]]; then
+    error "Distribution chart was not created!"
+fi
 
 success "Distribution chart generated."
+#endregion
 
+#region Evolution chart
 info "Generating commit evolution chart..."
 
-gnuplot <<EOF
+if ! gnuplot <<EOF
 set terminal pngcairo size 1400,750 enhanced font "Arial,11"
-set output "$OUTPUT/evolucao.png"
+set output "$EVOLUTION_CHART"
 
 set title "Commit Evolution - $PERIOD_LABEL"
 set xlabel "$AXIS_LABEL"
@@ -342,7 +428,16 @@ plot \
 "" using 1:7 with linespoints lw 2 title "CHORE", \
 "" using 1:8 with linespoints lw 2 title "STYLE", \
 "" using 1:9 with linespoints lw 2 title "OTHER"
+
+unset output
 EOF
+then
+    error "Failed to generate commit evolution chart!"
+fi
+
+if [[ ! -s "$EVOLUTION_CHART" ]]; then
+    error "Evolution chart was not created!"
+fi
 
 success "Evolution chart generated."
 #endregion
@@ -378,10 +473,11 @@ echo "             Generated Files              "
 echo "=========================================="
 echo
 
-success "distribuicao.png"
-success "evolucao.png"
+success "commits_raw.tsv"
 success "resumo.dat"
 success "evolution.dat"
+success "distribuicao.png"
+success "evolucao.png"
 
 echo
 echo -e "${GREEN}Success!${RESET} Reports saved to ${BOLD}$OUTPUT${RESET}."
