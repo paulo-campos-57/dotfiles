@@ -1,4 +1,3 @@
-
 #!/usr/bin/env bash
 
 set -euo pipefail
@@ -8,6 +7,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SOURCE_FILE="$SCRIPT_DIR/aliases.sh"
 TARGET_FILE="$HOME/.bash_aliases"
 BASHRC="$HOME/.bashrc"
+
+MANAGED_START="# BEGIN DOTFILES MANAGED"
+MANAGED_END="# END DOTFILES MANAGED"
 
 RED='\033[31m'
 GREEN='\033[32m'
@@ -33,11 +35,11 @@ error() {
     exit 1
 }
 
-TEMP_FILE=""
+TEMP_DIR=""
 
 cleanup() {
-    if [[ -n "$TEMP_FILE" && -f "$TEMP_FILE" ]]; then
-        rm -f -- "$TEMP_FILE"
+    if [[ -n "$TEMP_DIR" && -d "$TEMP_DIR" ]]; then
+        rm -rf -- "$TEMP_DIR"
     fi
 }
 
@@ -52,7 +54,7 @@ echo
 
 echo "--- Checking Requirements ---"
 
-for dependency in grep sed find chmod mktemp; do
+for dependency in bash grep sed find chmod mktemp awk sort cp mv; do
     if ! command -v "$dependency" &>/dev/null; then
         error "$dependency is not installed!"
     fi
@@ -78,17 +80,121 @@ else
 fi
 #endregion
 
+#region Source syntax validation
+echo
+echo "--- Validating Source Syntax ---"
+
+if ! bash -n "$SOURCE_FILE"; then
+    error "Source aliases file contains Bash syntax errors!"
+fi
+
+success "Source aliases syntax validated."
+#endregion
+
+#region Temporary files
+TEMP_DIR="$(mktemp -d)"
+
+TEMP_FILE="$TEMP_DIR/bash_aliases"
+MANAGED_FILE="$TEMP_DIR/managed"
+EXISTING_COMMANDS="$TEMP_DIR/existing-commands"
+MANAGED_COMMANDS="$TEMP_DIR/managed-commands"
+FUNCTION_NAMES="$TEMP_DIR/function-names"
+ALIAS_NAMES="$TEMP_DIR/alias-names"
+ALIAS_DEFINITIONS="$TEMP_DIR/alias-definitions"
+FUNCTION_DEFINITIONS="$TEMP_DIR/function-definitions"
+BASE_FILE="$TEMP_DIR/base"
+
+touch "$EXISTING_COMMANDS"
+touch "$MANAGED_COMMANDS"
+touch "$ALIAS_NAMES"
+touch "$FUNCTION_NAMES"
+#endregion
+
+#region Existing managed commands
+echo
+echo "--- Checking Previous Installation ---"
+
+if [[ -f "$TARGET_FILE" ]]; then
+    awk -v start="$MANAGED_START" -v end="$MANAGED_END" '
+        $0 == start {
+            inside = 1
+            next
+        }
+
+        $0 == end {
+            inside = 0
+            next
+        }
+
+        inside {
+            if ($0 ~ /^[[:space:]]*alias[[:space:]]+/) {
+                line = $0
+                sub(/^[[:space:]]*alias[[:space:]]+/, "", line)
+                sub(/=.*/, "", line)
+                print line
+            }
+
+            if ($0 ~ /^[[:space:]]*[a-zA-Z_][a-zA-Z0-9_]*[[:space:]]*\(\)[[:space:]]*\{/) {
+                line = $0
+                sub(/^[[:space:]]*/, "", line)
+                sub(/[[:space:]]*\(\).*/, "", line)
+                print line
+            }
+        }
+    ' "$TARGET_FILE" | sort -u > "$MANAGED_COMMANDS"
+
+    success "Previously managed commands identified."
+else
+    info "No previous managed installation found."
+fi
+#endregion
+
 #region Existing commands
 echo
 echo "--- Loading Existing Commands ---"
 
-EXISTING_COMMANDS="$(mktemp)"
-
-bash -ic '
-    compgen -A alias
+# Read commands from a clean Bash environment.
+# Existing managed definitions are filtered separately.
+bash --noprofile --norc -c '
+    compgen -A builtin
+    compgen -A keyword
     compgen -A function
     compgen -c
 ' 2>/dev/null | sort -u > "$EXISTING_COMMANDS" || true
+
+# Include aliases and functions defined in the user's Bash environment.
+# Do not execute the potentially broken .bash_aliases file.
+if [[ -f "$TARGET_FILE" ]]; then
+    awk -v start="$MANAGED_START" -v end="$MANAGED_END" '
+        $0 == start {
+            inside = 1
+            next
+        }
+
+        $0 == end {
+            inside = 0
+            next
+        }
+
+        !inside {
+            if ($0 ~ /^[[:space:]]*alias[[:space:]]+/) {
+                line = $0
+                sub(/^[[:space:]]*alias[[:space:]]+/, "", line)
+                sub(/=.*/, "", line)
+                print line
+            }
+
+            if ($0 ~ /^[[:space:]]*[a-zA-Z_][a-zA-Z0-9_]*[[:space:]]*\(\)[[:space:]]*\{/) {
+                line = $0
+                sub(/^[[:space:]]*/, "", line)
+                sub(/[[:space:]]*\(\).*/, "", line)
+                print line
+            }
+        }
+    ' "$TARGET_FILE" >> "$EXISTING_COMMANDS"
+fi
+
+sort -u "$EXISTING_COMMANDS" -o "$EXISTING_COMMANDS"
 
 success "Existing command names collected."
 #endregion
@@ -99,11 +205,21 @@ check_and_register() {
     local name="$2"
     local choice
 
+    # Commands installed by this installer are updated automatically,
+    # unless another external command with the same name exists.
+    if grep -Fxq -- "$name" "$MANAGED_COMMANDS" &&
+       ! grep -Fxq -- "$name" "$EXISTING_COMMANDS"; then
+        info "Updating previously installed $item_type '$name'."
+        return 0
+    fi
+
     if grep -Fxq -- "$name" "$EXISTING_COMMANDS"; then
         warning "Command '$name' already exists on your system."
         info "Type: $item_type"
 
-        read -r -p "Do you want to overwrite it with the repo version? (y/N): " choice
+        read -r -p \
+            "Do you want to overwrite it with the repo version? (y/N): " \
+            choice
 
         if [[ ! "${choice:-N}" =~ ^[yY]$ ]]; then
             info "'$name' skipped."
@@ -116,113 +232,177 @@ check_and_register() {
 }
 #endregion
 
-#region Alias installation
+#region Source definition extraction
 echo
-echo "--- Checking Aliases ---"
+echo "--- Extracting Source Definitions ---"
 
-TEMP_FILE="$(mktemp)"
+# Extract alias names and complete definitions using Bash itself.
+# Bash parses the source file instead of relying on regular expressions
+# to reconstruct alias values.
+
+bash --noprofile --norc -c '
+    source "$1"
+    alias -p
+' _ "$SOURCE_FILE" > "$ALIAS_DEFINITIONS"
+
+sed -nE \
+    's/^alias ([^=]+)=.*/\1/p' \
+    "$ALIAS_DEFINITIONS" | sort -u > "$ALIAS_NAMES"
+
+# Extract function names from the original file.
+# The names are then resolved with Bash declare -f.
+awk '
+    /^[[:space:]]*[a-zA-Z_][a-zA-Z0-9_]*[[:space:]]*\(\)[[:space:]]*\{/ {
+        line = $0
+        sub(/^[[:space:]]*/, "", line)
+        sub(/[[:space:]]*\(\).*/, "", line)
+        print line
+    }
+' "$SOURCE_FILE" | sort -u > "$FUNCTION_NAMES"
+
+# Generate all function definitions using Bash's own parser.
+bash --noprofile --norc -c '
+    source "$1"
+
+    while IFS= read -r function_name; do
+        [[ -n "$function_name" ]] || continue
+
+        if ! declare -F "$function_name" >/dev/null; then
+            printf "[ERROR] Function not found: %s\n" \
+                "$function_name" >&2
+            exit 1
+        fi
+
+        declare -f "$function_name"
+        printf "\n"
+    done < "$2"
+' _ "$SOURCE_FILE" "$FUNCTION_NAMES" > "$FUNCTION_DEFINITIONS"
+
+success "Source definitions extracted successfully."
+#endregion
+
+#region Prepare installation
+echo
+echo "--- Preparing Installation ---"
 
 if [[ -f "$TARGET_FILE" ]]; then
-    cp "$TARGET_FILE" "$TEMP_FILE"
+    # Preserve everything outside the installer-managed section.
+    awk -v start="$MANAGED_START" -v end="$MANAGED_END" '
+        $0 == start {
+            inside = 1
+            next
+        }
+
+        $0 == end {
+            inside = 0
+            next
+        }
+
+        !inside {
+            print
+        }
+    ' "$TARGET_FILE" > "$BASE_FILE"
+else
+    touch "$BASE_FILE"
 fi
 
-sed -i '/^# BEGIN DOTFILES MANAGED$/,/^# END DOTFILES MANAGED$/d' "$TEMP_FILE"
-
-MANAGED_FILE="$(mktemp)"
-trap 'rm -f -- "$TEMP_FILE" "$MANAGED_FILE" "$EXISTING_COMMANDS"' EXIT
+cp "$BASE_FILE" "$TEMP_FILE"
 
 {
     echo
-    echo "# BEGIN DOTFILES MANAGED"
+    echo "$MANAGED_START"
     echo "# Automatically generated by dotfiles/scripts/install.sh"
     echo
 } > "$MANAGED_FILE"
 
 printf -v QUOTED_SCRIPT_DIR '%q' "$SCRIPT_DIR"
-printf 'DOTFILES_SCRIPTS_DIR=%s\n\n' "$QUOTED_SCRIPT_DIR" >> "$MANAGED_FILE"
 
-mapfile -t ALIASES < <(
-    grep -E '^[[:space:]]*alias[[:space:]]+' "$SOURCE_FILE" |
-    sed -E 's/^[[:space:]]*alias[[:space:]]+([^=]+)=.*/\1/'
-)
+printf 'DOTFILES_SCRIPTS_DIR=%s\n\n' \
+    "$QUOTED_SCRIPT_DIR" >> "$MANAGED_FILE"
 
-for alias_name in "${ALIASES[@]}"; do
+success "Installation files prepared."
+#endregion
+
+#region Alias installation
+echo
+echo "--- Checking Aliases ---"
+
+ALIAS_COUNT=0
+
+while IFS= read -r alias_name; do
+    [[ -n "$alias_name" ]] || continue
+
     if check_and_register "alias" "$alias_name"; then
-        grep -F "alias $alias_name=" "$SOURCE_FILE" >> "$MANAGED_FILE"
-    fi
-done
+        grep -F -- "alias $alias_name=" \
+            "$ALIAS_DEFINITIONS" >> "$MANAGED_FILE"
 
-success "Alias selection completed."
+        ((ALIAS_COUNT+=1))
+    fi
+done < "$ALIAS_NAMES"
+
+success "$ALIAS_COUNT aliases selected."
 #endregion
 
 #region Function installation
 echo
 echo "--- Checking Functions ---"
 
-FUNCTION_NAMES="$(mktemp)"
-
-awk '
-/^[[:space:]]*[a-zA-Z_][a-zA-Z0-9_]*[[:space:]]*\(\)[[:space:]]*\{/ {
-    line = $0
-    sub(/^[[:space:]]*/, "", line)
-    sub(/[[:space:]]*\(\).*/, "", line)
-    print line
-}
-' "$SOURCE_FILE" > "$FUNCTION_NAMES"
+FUNCTION_COUNT=0
 
 while IFS= read -r function_name; do
     [[ -n "$function_name" ]] || continue
 
     if check_and_register "function" "$function_name"; then
-        awk -v target="$function_name" '
-        function count_char(text, char,    i, count) {
-            count = 0
-
-            for (i = 1; i <= length(text); i++) {
-                if (substr(text, i, 1) == char)
-                    count++
-            }
-
-            return count
-        }
-
-        BEGIN {
-            inside = 0
-            depth = 0
-        }
-
-        !inside {
-            pattern = "^[[:space:]]*" target "[[:space:]]*\\(\\)[[:space:]]*\\{"
-
-            if ($0 ~ pattern) {
-                inside = 1
-            }
-        }
-
-        inside {
-            print
-
-            depth += count_char($0, "{")
-            depth -= count_char($0, "}")
-
-            if (depth == 0) {
-                exit
-            }
-        }
-        ' "$SOURCE_FILE" >> "$MANAGED_FILE"
+        # Extract the exact function definition from Bash.
+        # No manual brace counting is performed.
+        bash --noprofile --norc -c '
+            source "$1"
+            declare -f "$2"
+        ' _ "$SOURCE_FILE" "$function_name" >> "$MANAGED_FILE"
 
         echo >> "$MANAGED_FILE"
+
+        ((FUNCTION_COUNT+=1))
     fi
 done < "$FUNCTION_NAMES"
 
-rm -f "$FUNCTION_NAMES"
+success "$FUNCTION_COUNT functions selected."
+#endregion
 
-echo "# END DOTFILES MANAGED" >> "$MANAGED_FILE"
+#region Generated file syntax validation
+echo
+echo "--- Validating Generated Bash Syntax ---"
+
+echo "$MANAGED_END" >> "$MANAGED_FILE"
 
 cat "$MANAGED_FILE" >> "$TEMP_FILE"
 
-mv "$TEMP_FILE" "$TARGET_FILE"
-TEMP_FILE=""
+if ! bash -n "$MANAGED_FILE"; then
+    error "Generated managed definitions contain syntax errors!"
+fi
+
+success "Managed definitions syntax validated."
+
+if ! bash -n "$TEMP_FILE"; then
+    error "Generated .bash_aliases contains syntax errors. Installation aborted!"
+fi
+
+success "Complete .bash_aliases syntax validated."
+#endregion
+
+#region Install aliases
+echo
+echo "--- Installing Aliases and Functions ---"
+
+# Preserve the original file permissions when possible.
+if [[ -f "$TARGET_FILE" ]]; then
+    chmod --reference="$TARGET_FILE" "$TEMP_FILE"
+else
+    chmod 644 "$TEMP_FILE"
+fi
+
+# Both files were validated before replacing the user's configuration.
+mv -f -- "$TEMP_FILE" "$TARGET_FILE"
 
 success "Aliases and functions installed in $TARGET_FILE."
 #endregion
@@ -270,7 +450,9 @@ if (( SCRIPT_COUNT > 0 )); then
     info "The installer can grant execution permission to discovered scripts."
     info "Only files inside the dotfiles scripts directory will be affected."
 
-    read -r -p "Grant execution permission to all utility scripts? (y/N): " PERMISSION_CHOICE
+    read -r -p \
+        "Grant execution permission to all utility scripts? (y/N): " \
+        PERMISSION_CHOICE
 
     if [[ "${PERMISSION_CHOICE:-N}" =~ ^[yY]$ ]]; then
         PERMISSION_SUCCESS=0
@@ -330,7 +512,8 @@ echo "           Installation Summary           "
 echo "=========================================="
 echo
 
-success "Aliases and functions configured."
+success "$ALIAS_COUNT aliases configured."
+success "$FUNCTION_COUNT functions configured."
 success "$SCRIPT_COUNT utility scripts discovered."
 
 info "Scripts directory: $SCRIPT_DIR"
