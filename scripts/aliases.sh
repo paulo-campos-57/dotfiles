@@ -1,67 +1,133 @@
-# utils
+
+#!/usr/bin/env bash
+
+#region System utilities
 alias cls='clear'
 
-alias path='echo -e ${PATH//:/\\n}'
+alias path='printf "%s\n" "${PATH//:/$'\''\n'\''}"'
 alias ff='find . -type f -name'
 
 mcd() {
-    [[ -z "$1" ]] && { echo "Usage: mcd <dir-name>"; return 1; }
-    mkdir -p "$1" && cd "$1"
+    if [[ -z "${1:-}" ]]; then
+        echo "Usage: mcd <dir-name>"
+        return 1
+    fi
+
+    mkdir -p -- "$1" && cd -- "$1"
 }
 
 gohome() {
-    cd "$HOME" && echo "You are here: $(pwd)"
+    cd -- "$HOME" || return 1
+    echo "You are here: $(pwd)"
 }
+#endregion
 
-# navigation aliases
+#region Navigation aliases
 alias ..='cd ..'
 alias ...='cd ../..'
 alias ....='cd ../../..'
+#endregion
 
-# file and net operation
-alias myip='curl ifconfig.me; echo'
-alias ports='netstat -tulanp'
+#region File and network operations
+alias myip='curl -fsS https://ifconfig.me; echo'
+alias ports='ss -tulnp'
 alias diskh='df -h'
-alias fmem='free -m -h'
+alias fmem='free -h'
 
-# extract from any extension
 extract() {
-        if [ -f "$1" ]; then
-                case "$1" in
-                        *.tar.bz2)   tar xjf "$1"     ;;
-                        *.tar.gz)    tar xzf "$1"     ;;
-                        *.bz2)       bunzip2 "$1"     ;;
-                        *.rar)       unrar x "$1"     ;;
-                        *.gz)        gunzip "$1"      ;;
-                        *.tar)       tar xvf "$1"     ;;
-                        *.tbz2)      tar xjf "$1"     ;;
-                        *.tgz)       tar xzf "$1"     ;;
-                        *.zip)       unzip "$1"       ;;
-                        *.Z)         uncompress "$1"  ;;
-                        *.7z)        7z x "$1"        ;;
-                        *)           echo "'$1' cannot be extracted via extract()" ;;
-                esac
-        else
-                echo "'$1' is not a valid file"
-        fi
+    if [[ -z "${1:-}" ]]; then
+        echo "Usage: extract <file>"
+        return 1
+    fi
+
+    if [[ ! -f "$1" ]]; then
+        echo "[ERROR] '$1' is not a valid file." >&2
+        return 1
+    fi
+
+    case "$1" in
+        *.tar.bz2|*.tbz2)
+            tar -xjf "$1"
+            ;;
+        *.tar.gz|*.tgz)
+            tar -xzf "$1"
+            ;;
+        *.tar)
+            tar -xvf "$1"
+            ;;
+        *.bz2)
+            bunzip2 -- "$1"
+            ;;
+        *.gz)
+            gunzip -- "$1"
+            ;;
+        *.zip)
+            unzip -- "$1"
+            ;;
+        *.rar)
+            unrar x "$1"
+            ;;
+        *.7z)
+            7z x "$1"
+            ;;
+        *.Z)
+            uncompress -- "$1"
+            ;;
+        *)
+            echo "[ERROR] Unsupported archive format: '$1'." >&2
+            return 1
+            ;;
+    esac
 }
 
-# creates a backup file of any file
 bak() {
-        [[ -z "$1" ]] && { echo "Usage: bak <file>"; return 1; }
-        cp -r "$1" "${1}.bak" && echo "Backup created: ${1}.bak"
+    if [[ -z "${1:-}" ]]; then
+        echo "Usage: bak <file|directory>"
+        return 1
+    fi
+
+    if [[ ! -e "$1" ]]; then
+        echo "[ERROR] File or directory not found: '$1'." >&2
+        return 1
+    fi
+
+    local backup="${1}.bak"
+
+    if [[ -e "$backup" ]]; then
+        echo "[ERROR] Backup already exists: '$backup'." >&2
+        return 1
+    fi
+
+    cp -a -- "$1" "$backup" || return 1
+    echo "[OK] Backup created: $backup"
 }
 
-# searches a process by name
 psg() {
-        [[ -z "$1"]] && { echo "Usage: psg <process-name>"; return 1; }
-        ps aux | grep -v grep | grep -i --color=auto "$1"
+    if [[ -z "${1:-}" ]]; then
+        echo "Usage: psg <process-name>"
+        return 1
+    fi
+
+    ps aux | awk -v pattern="$1" '
+        BEGIN {
+            IGNORECASE = 1
+        }
+        NR == 1 {
+            print
+            next
+        }
+        {
+            line = tolower($0)
+            search = tolower(pattern)
+
+            if (index(line, search) > 0)
+                print
+        }
+    '
 }
+#endregion
 
-# ========================
-# GIT SHORTCUTS AND ALIASES
-# =======================
-
+#region Git shortcuts and aliases
 alias gsts='git status'
 alias gbranch='git branch --show-current'
 alias gph='git push origin HEAD'
@@ -70,126 +136,94 @@ alias glogg='git log --graph --oneline --decorate --all'
 alias gprune='git fetch --prune'
 alias gfo='git fetch origin'
 
-# create new branch
 gnb() {
-        if  [[ -z "$1" ]]; then
-                echo "Usage: gnb <branch-name>"
-                return 1
-        fi
-
-        git switch -c "$1"
-}
-
-
-# switch to existing branch
-gco() {
-        local branch="$1"
-
-        [[ -z "$branch" ]] && {
-                echo "Usage: gco <branch-name>"
-                return 1
-        }
-
-        git switch "$branch"
-}
-
-# restore file
-grs() {
-        local file="$1"
-
-        [[ -z "$file" ]] && {
-                echo "Usage: grs <file>"
-                return 1
-        }
-
-        git restore "$file"
-}
-
-# delete branch
-gdb(){
-        if [ -z "$1" ]; then
-                echo "Usage: gdb <branch-name>"
-                return 1
-        fi
-
-        current_branch=$(git branch --show-current)
-
-        if [ "$1" = "$current_branch" ]; then
-                echo "Error: you are currently on branch '$1'."
-                echo "Checkout to another branch before deleting it."
-                return 1
-        fi
-
-        echo "Deleting branch: $1"
-        read -p "Are you sure? (y/N): " confirm
-
-        if [[ "$confirm" =~ ^[yY]$ ]]; then
-                git branch -D "$1"
-        else
-                echo "Aborted"
-        fi
-}
-
-# list all git commands
-ghelp() {
-        echo "GIT SHORTCUTS:"
-        echo
-        # Info and status
-        printf " %-8s %s\n" "gsts" "Shows repo status"
-        printf " %-8s %s\n" "gbranch" "Shows current branch"
-        printf " %-8s %s\n" "glog" "Shows commit count per author"
-        printf " %-8s %s\n" "glogg" "Shows visual commit tree"
-        echo
-        # Branches flow
-        printf " %-8s %s\n" "gco" "Switches to existing branch"
-        printf " %-8s %s\n" "gnb" "Creates a new branch from current"
-        printf " %-8s %s\n" "gph" "Pushes to HEAD branch"
-        printf " %-8s %s\n" "gfo" "Fetches remote updates safely without merging"
-        echo
-        # Changes and maintenance
-        printf " %-8s %s\n" "grs" "Restores file to git state"
-        printf " %-8s %s\n" "gdb" "Deletes specific branch"
-        printf " %-8s %s\n" "gprune" "Clears local refs of deleted branches"
-        echo
-}
-
-# ========================
-# DOCKER SHORTCUTS AND ALIASES
-# =======================
-
-alias dps='docker ps --format "table {{.ID}}\t{{.Names}}\t{{.Status}}\t{{.Ports}}"'
-alias dstopall='docker stop $(docker ps -a -q)'
-
-# enters the bash/sh of an executing container
-dexec() {
-        [[ -z "$1" ]] && { echo "Usage: dexec <container-name|id>"; return 1; }
-        local shell="${2:-bash}"
-        docker exec -it "$1" "$shell"
-}
-
-# clears unused containers images and volumes
-dclean() {
-        echo "Cleaning unused docker resources..."
-        docker system prune -a --volumes -f
-}
-
-# ========================
-# GIT REPORT GENERATORS
-# ========================
-
-#region Report configuration
-_git_reports_dir() {
-    if [[ -z "${DOTFILES_SCRIPTS_DIR:-}" ]]; then
-        echo "[ERROR] DOTFILES_SCRIPTS_DIR is not configured!" >&2
+    if [[ -z "${1:-}" ]]; then
+        echo "Usage: gnb <branch-name>"
         return 1
     fi
 
-    printf '%s\n' "$DOTFILES_SCRIPTS_DIR/git"
+    git switch -c "$1"
+}
+
+gco() {
+    if [[ -z "${1:-}" ]]; then
+        echo "Usage: gco <branch-name>"
+        return 1
+    fi
+
+    git switch "$1"
+}
+
+grs() {
+    if [[ -z "${1:-}" ]]; then
+        echo "Usage: grs <file>"
+        return 1
+    fi
+
+    git restore -- "$1"
+}
+
+gdb() {
+    if [[ -z "${1:-}" ]]; then
+        echo "Usage: gdb <branch-name>"
+        return 1
+    fi
+
+    local branch="$1"
+    local current_branch
+    local confirm
+
+    current_branch="$(git branch --show-current)" || return 1
+
+    if [[ "$branch" == "$current_branch" ]]; then
+        echo "[ERROR] You are currently on branch '$branch'." >&2
+        echo "Switch to another branch before deleting it."
+        return 1
+    fi
+
+    echo "[WARNING] Force deleting branch: $branch"
+
+    read -r -p "Are you sure? (y/N): " confirm
+
+    if [[ "$confirm" =~ ^[yY]$ ]]; then
+        git branch -D -- "$branch"
+    else
+        echo "[INFO] Operation aborted."
+    fi
+}
+#endregion
+
+#region Git report configuration
+_git_reports_dir() {
+    if [[ -z "${DOTFILES_SCRIPTS_DIR:-}" ]]; then
+        echo "[ERROR] DOTFILES_SCRIPTS_DIR is not configured!" >&2
+        echo "Run the dotfiles installer again." >&2
+        return 1
+    fi
+
+    local scripts_dir="$DOTFILES_SCRIPTS_DIR"
+
+    if [[ ! -d "$scripts_dir/git" ]]; then
+        echo "[ERROR] Git scripts directory not found: $scripts_dir/git" >&2
+        return 1
+    fi
+
+    printf '%s\n' "$scripts_dir/git"
 }
 
 _run_git_report() {
+    if [[ $# -lt 1 ]]; then
+        echo "[ERROR] Report script name is required!" >&2
+        return 1
+    fi
+
     local script_name="$1"
     shift
+
+    if [[ $# -gt 2 ]]; then
+        echo "Usage: <report-command> [repository] [output-directory]" >&2
+        return 1
+    fi
 
     local scripts_dir
     local script_path
@@ -228,7 +262,7 @@ _run_git_report() {
 }
 #endregion
 
-#region Report commands
+#region Git report commands
 gcommits() {
     _run_git_report "commit-report.sh" "$@"
 }
@@ -246,7 +280,56 @@ gchurn() {
 }
 #endregion
 
-#region Report help
+#region Git help
+ghelp() {
+    echo "=========================================="
+    echo "             Git Shortcuts                "
+    echo "=========================================="
+    echo
+
+    printf " %-16s %s\n" "COMMAND" "DESCRIPTION"
+    echo "------------------------------------------------------------"
+
+    printf " %-16s %s\n" "gsts" "Shows repository status"
+    printf " %-16s %s\n" "gbranch" "Shows current branch"
+    printf " %-16s %s\n" "glog" "Shows commit count per author"
+    printf " %-16s %s\n" "glogg" "Shows visual commit tree"
+
+    echo
+    echo "--- Branch Operations ---"
+    echo
+
+    printf " %-16s %s\n" "gco" "Switches to an existing branch"
+    printf " %-16s %s\n" "gnb" "Creates a new branch"
+    printf " %-16s %s\n" "gdb" "Force deletes a local branch"
+
+    echo
+    echo "--- Remote Operations ---"
+    echo
+
+    printf " %-16s %s\n" "gph" "Pushes current HEAD to origin"
+    printf " %-16s %s\n" "gfo" "Fetches updates from origin"
+    printf " %-16s %s\n" "gprune" "Fetches and prunes stale remote refs"
+
+    echo
+    echo "--- File Operations ---"
+    echo
+
+    printf " %-16s %s\n" "grs" "Restores a file from Git"
+
+    echo
+    echo "--- Reports ---"
+    echo
+
+    printf " %-16s %s\n" "gcommits" "Generates commit statistics"
+    printf " %-16s %s\n" "gbranches" "Analyzes repository branches"
+    printf " %-16s %s\n" "gcontributors" "Analyzes contributor activity"
+    printf " %-16s %s\n" "gchurn" "Analyzes code churn"
+    printf " %-16s %s\n" "greports" "Displays report commands"
+}
+#endregion
+
+#region Git report help
 greports() {
     echo "=========================================="
     echo "             Git Report Tools             "
@@ -270,5 +353,57 @@ greports() {
     echo "  gbranches /path/to/repository"
     echo "  gcontributors /path/to/repository"
     echo "  gchurn /path/to/repository /path/to/output"
+}
+#endregion
+
+#region Docker shortcuts and aliases
+alias dps='docker ps --format "table {{.ID}}\t{{.Names}}\t{{.Status}}\t{{.Ports}}"'
+
+dstopall() {
+    if ! command -v docker &>/dev/null; then
+        echo "[ERROR] Docker is not installed!" >&2
+        return 1
+    fi
+
+    local containers
+
+    containers="$(docker ps -q)" || return 1
+
+    if [[ -z "$containers" ]]; then
+        echo "[INFO] No running containers found."
+        return 0
+    fi
+
+    echo "[WARNING] Stopping all running containers..."
+
+    docker stop $containers
+}
+
+dexec() {
+    if [[ -z "${1:-}" ]]; then
+        echo "Usage: dexec <container-name|id> [shell]"
+        return 1
+    fi
+
+    local container="$1"
+    local shell="${2:-bash}"
+
+    docker exec -it "$container" "$shell"
+}
+
+dclean() {
+    local confirm
+
+    echo "[WARNING] This will remove unused Docker resources,"
+    echo "including unused images, containers, networks and volumes."
+    echo
+
+    read -r -p "Are you sure? (y/N): " confirm
+
+    if [[ "$confirm" =~ ^[yY]$ ]]; then
+        docker system prune -a --volumes -f
+    else
+        echo "[INFO] Operation aborted."
+    fi
 }
 #endregion
